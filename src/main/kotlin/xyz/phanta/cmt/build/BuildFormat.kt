@@ -79,11 +79,11 @@ enum class BuildFormat(val key: String) {
             PrintStream(Files.newOutputStream(dest).buffered()).use { out ->
                 out.println("digraph modpack {")
                 LOGGER.info { "Collecting mod nodes..." }
-                workspace.model.mods.values.forEach { out.println("  ${it.mod.slug} [label=\"${it.version}\"]") }
+                workspace.model.mods.values.forEach { out.println("  \"${it.mod.slug}\" [label=\"$it\"]") }
                 LOGGER.info { "Collecting dependency edges..." }
                 workspace.model.mods.values.forEach { mod ->
                     mod.dependencies.forEach {
-                        out.println("  $it -> ${mod.mod.slug}")
+                        out.println("  \"$it\" -> \"${mod.mod.slug}\"")
                     }
                 }
                 out.println("}")
