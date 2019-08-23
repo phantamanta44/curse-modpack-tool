@@ -12,6 +12,7 @@ private class CmtMain : CmtDelegatingCommand(
         CommandAddAll(),
         CommandBuild(),
         CommandDepCheck(),
+        CommandInfo(),
         CommandInit(),
         CommandList(),
         CommandLoader(),
