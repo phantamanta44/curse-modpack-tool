@@ -57,6 +57,13 @@ class ModpackWorkspace(val workingDir: Path, val model: ModpackModel) {
     private fun addResolveMods(refs: List<ModVersionRef>, recurseDeps: Boolean) {
         var countSuccess = 0
         var countFailure = 0
+        for (i in refs.indices) {
+            for (j in (i + 1)..refs.lastIndex) {
+                if (refs[i].slug == refs[j].slug) {
+                    throw IllegalArgumentException("Duplicate installation requests for \"${refs[i].slug}\"!")
+                }
+            }
+        }
         val refQueue = LinkedList(refs)
         queueLoop@ while (refQueue.isNotEmpty()) {
             val ref = refQueue.pop()
@@ -88,10 +95,13 @@ class ModpackWorkspace(val workingDir: Path, val model: ModpackModel) {
                         val deps = mod.dependencies.filter { it !in model.mods }
                         if (deps.isNotEmpty()) {
                             LOGGER.info { "Found ${deps.size} missing dependency(s): ${deps.joinToString(", ")}" }
-                            deps.forEach { refQueue += OpenModVersionRef(it) }
+                            deps.forEach { dep ->
+                                if (!refQueue.any { it.slug == dep }) {
+                                    refQueue += OpenModVersionRef(dep)
+                                }
+                            }
                         }
                     }
-                    refQueue.removeIf { it.slug == mod.mod.slug }
                     ++countSuccess
                 }
             } catch (e: Exception) {
