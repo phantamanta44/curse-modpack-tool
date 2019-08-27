@@ -20,7 +20,7 @@ data class ModVersion(
             enumValueOf(
                 dto.string("game_version") ?: throw IllegalArgumentException("Expected mod version game version!")
             ),
-            Instant.ofEpochMilli(
+            Instant.ofEpochSecond(
                 dto.long("timestamp") ?: throw IllegalArgumentException("Expected mod version timestamp!")
             ),
             (dto.array<String>("dependencies")
@@ -34,7 +34,7 @@ data class ModVersion(
             "version" to version,
             "file_id" to fileId,
             "game_version" to gameVersion.name,
-            "timestamp" to timestamp.toEpochMilli(),
+            "timestamp" to timestamp.epochSecond,
             "dependencies" to array(dependencies.toList())
         )
     }
