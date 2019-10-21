@@ -17,7 +17,8 @@ private class CmtMain : CmtDelegatingCommand(
         CommandList(),
         CommandLoader(),
         CommandProp(),
-        CommandRemove()
+        CommandRemove(),
+        CommandUpdate()
     )
 )
 
