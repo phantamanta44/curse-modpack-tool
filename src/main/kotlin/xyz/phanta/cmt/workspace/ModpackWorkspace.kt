@@ -57,12 +57,10 @@ class ModpackWorkspace(val workingDir: Path, val model: ModpackModel) {
     private fun addResolveMods(refs: List<ModVersionRef>, recurseDeps: Boolean) {
         var countSuccess = 0
         var countFailure = 0
-        for (i in refs.indices) {
-            for (j in (i + 1)..refs.lastIndex) {
-                if (refs[i].slug == refs[j].slug) {
-                    throw IllegalArgumentException("Duplicate installation requests for \"${refs[i].slug}\"!")
-                }
-            }
+        val dupeCheck = mutableSetOf<String>()
+        for (ref in refs) {
+            require(ref.slug !in dupeCheck) { "Duplicate installation requests for \"${ref.slug}\"!" }
+            dupeCheck += ref.slug
         }
         val refQueue = LinkedList(refs)
         queueLoop@ while (refQueue.isNotEmpty()) {
