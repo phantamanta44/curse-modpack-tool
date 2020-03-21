@@ -4,8 +4,12 @@ import com.beust.klaxon.JsonObject
 import com.beust.klaxon.Parser
 import xyz.phanta.cmt.LOGGER
 import xyz.phanta.cmt.curse.CurseReader
+import xyz.phanta.cmt.curse.parseMod
+import xyz.phanta.cmt.curse.parseVersion
+import xyz.phanta.cmt.model.GameVersion
 import xyz.phanta.cmt.model.ModpackModel
 import xyz.phanta.cmt.util.ClosedModVersionRef
+import xyz.phanta.cmt.util.ModRef
 import xyz.phanta.cmt.util.ModVersionRef
 import xyz.phanta.cmt.util.OpenModVersionRef
 import java.nio.file.Files
@@ -46,7 +50,7 @@ class ModpackWorkspace(val workingDir: Path, val model: ModpackModel) {
             addResolveMods(refs, recurseDeps)
         } else {
             addResolveMods(refs.filter {
-                model.mods[it.slug]?.let {
+                model.getMod(it.modRef)?.let {
                     LOGGER.warn { "Skipping mod \"${it.mod.slug}\" already installed @${it.fileId} (${it.version})!" }
                     false
                 } ?: true
@@ -57,44 +61,60 @@ class ModpackWorkspace(val workingDir: Path, val model: ModpackModel) {
     private fun addResolveMods(refs: List<ModVersionRef>, recurseDeps: Boolean) {
         var countSuccess = 0
         var countFailure = 0
-        val dupeCheck = mutableSetOf<String>()
+
+        val dupeCheck = mutableSetOf<ModRef>()
         for (ref in refs) {
-            require(ref.slug !in dupeCheck) { "Duplicate installation requests for \"${ref.slug}\"!" }
-            dupeCheck += ref.slug
+            require(ref.modRef !in dupeCheck) { "Duplicate installation requests for \"${ref.modRef}\"!" }
+            dupeCheck += ref.modRef
         }
+
         val refQueue = LinkedList(refs)
         queueLoop@ while (refQueue.isNotEmpty()) {
             val ref = refQueue.pop()
             LOGGER.info { "Resolving reference [${refQueue.size}]: $ref" }
-            val closedRef = when (ref) {
+            val (mod, fileId) = when (ref) {
                 is OpenModVersionRef -> try {
-                    LOGGER.info { "Retrieving latest available version..." }
-                    val resolved = CurseReader.readLatestModVersion(ref.slug, model.gameVersion)
-                    if (resolved == null) {
+                    LOGGER.info { "Retrieving mod details..." }
+                    val modDto = CurseReader.retrieveMod(ref.modRef)
+                    val latestFileDto = modDto.gameVersionLatestFiles.firstOrNull { fileDto ->
+                        GameVersion.parseGracefully(fileDto.gameVersion)?.let {
+                            model.gameVersion.isCompatibleWith(it)
+                        } ?: false
+                    }
+                    if (latestFileDto != null) {
+                        modDto.parseMod() to latestFileDto.projectFileId
+                    } else {
                         LOGGER.warn { "Could not find suitable ${model.gameVersion} version for \"$ref\"!" }
                         ++countFailure
                         continue@queueLoop
-                    } else {
-                        resolved
                     }
                 } catch (e: Exception) {
-                    LOGGER.warn(e) { "Could not retrieve latest version for \"$ref\"!" }
+                    LOGGER.warn(e) { "Could not retrieve mod details for \"$ref\"!" }
                     ++countFailure
                     continue@queueLoop
                 }
-                is ClosedModVersionRef -> ref
+                is ClosedModVersionRef -> model.getMod(ref.modRef)?.let { it.mod to ref.fileId } ?: try {
+                    LOGGER.info { "Retrieving mod details..." }
+                    CurseReader.retrieveMod(ref.modRef).parseMod() to ref.fileId
+                } catch (e: Exception) {
+                    LOGGER.warn(e) { "Could not retrieve mod details for \"$ref\"!" }
+                    ++countFailure
+                    continue@queueLoop
+                }
             }
+
             LOGGER.info { "Retrieving mod file data..." }
             try {
-                CurseReader.readModVersionData(closedRef.slug, closedRef.fileId, model.gameVersion).let { mod ->
-                    LOGGER.info { "Added mod $mod" }
-                    model.mods[mod.mod.slug] = mod
+                CurseReader.retrieveModFile(mod.projectId, fileId).let { fileDto ->
+                    val modVersion = fileDto.parseVersion(mod, model.gameVersion)
+                    LOGGER.info { "Added mod $modVersion" }
+                    model.putMod(modVersion)
                     if (recurseDeps) {
-                        val deps = mod.dependencies.filter { it !in model.mods }
+                        val deps = modVersion.dependencies.filter { model.getMod(it) == null }
                         if (deps.isNotEmpty()) {
                             LOGGER.info { "Found ${deps.size} missing dependency(s): ${deps.joinToString(", ")}" }
                             deps.forEach { dep ->
-                                if (!refQueue.any { it.slug == dep }) {
+                                if (!refQueue.any { it.modRef == dep }) {
                                     refQueue += OpenModVersionRef(dep)
                                 }
                             }
@@ -103,7 +123,7 @@ class ModpackWorkspace(val workingDir: Path, val model: ModpackModel) {
                     ++countSuccess
                 }
             } catch (e: Exception) {
-                LOGGER.warn(e) { "Could not retrieve version data for \"$closedRef\"!" }
+                LOGGER.warn(e) { "Could not retrieve version data for \"${mod.slug}@$fileId\"!" }
                 ++countFailure
             }
         }

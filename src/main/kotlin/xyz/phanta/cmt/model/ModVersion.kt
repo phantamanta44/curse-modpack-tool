@@ -2,6 +2,7 @@ package xyz.phanta.cmt.model
 
 import com.beust.klaxon.JsonObject
 import com.beust.klaxon.json
+import xyz.phanta.cmt.util.ModRef
 import java.time.Instant
 
 data class ModVersion(
@@ -10,7 +11,7 @@ data class ModVersion(
     val fileId: Long,
     val gameVersion: GameVersion,
     val timestamp: Instant,
-    val dependencies: Set<String>
+    val dependencies: Set<ModRef>
 ) {
     companion object {
         fun deserialize(dto: JsonObject): ModVersion = ModVersion(
@@ -23,7 +24,7 @@ data class ModVersion(
             Instant.ofEpochSecond(
                 dto.long("timestamp") ?: throw IllegalArgumentException("Expected mod version timestamp!")
             ),
-            (dto.array<String>("dependencies")
+            (dto.array<String>("dependencies")?.map { ModRef.parse(it) }
                 ?: throw IllegalArgumentException("Expected mod version dependencies!")).toSet()
         )
     }
@@ -35,7 +36,7 @@ data class ModVersion(
             "file_id" to fileId,
             "game_version" to gameVersion.name,
             "timestamp" to timestamp.epochSecond,
-            "dependencies" to array(dependencies.toList())
+            "dependencies" to array(dependencies.map { it.toString() })
         )
     }
 

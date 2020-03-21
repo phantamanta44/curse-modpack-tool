@@ -1,88 +1,55 @@
 package xyz.phanta.cmt.curse
 
-import org.jsoup.HttpStatusException
-import org.jsoup.Jsoup
-import org.jsoup.nodes.Document
-import org.jsoup.nodes.Element
-import org.jsoup.select.Collector
-import org.jsoup.select.Elements
-import org.jsoup.select.Evaluator
+import com.beust.klaxon.JsonObject
+import com.beust.klaxon.Klaxon
+import com.beust.klaxon.internal.firstNotNullResult
 import xyz.phanta.cmt.model.GameVersion
 import xyz.phanta.cmt.model.Mod
 import xyz.phanta.cmt.model.ModVersion
-import xyz.phanta.cmt.util.ClosedModVersionRef
 import xyz.phanta.cmt.util.License
+import xyz.phanta.cmt.util.ModProjectId
+import xyz.phanta.cmt.util.ModRef
+import xyz.phanta.cmt.util.ModSlug
+import java.io.Reader
 import java.net.URL
-import java.time.Instant
 
 object CurseReader {
-    fun readLatestModVersion(modSlug: String, gameVersion: GameVersion): ClosedModVersionRef? =
-        retrieveProject(modSlug).getElementsByClass("cf-recentfiles")
-            .firstOrNull {
-                GameVersion.parseGracefully(it.previousElementSibling().text().substring(10))
-                    ?.let(gameVersion::isCompatibleWith) ?: false
-            }
-            ?.let { tag ->
-                val pathNodes = tag.getElementsByTag("a").first { it.hasClass("overflow-tip") }.attr("href")
-                    .trim('/').split('/')
-                ClosedModVersionRef(pathNodes[pathNodes.lastIndex - 2], pathNodes.last().toLong())
-            }
+    fun retrieveModById(projectId: Long): CurseApiMod = ApiUrlBuilder("addon", projectId.toString()).build()
+        .retrieve { CurseApiMod.deserialize(Klaxon().parseJsonObject(it)) }
 
-    fun readModVersionData(modSlug: String, fileVersion: Long, defaultVersion: GameVersion): ModVersion {
-        val page = retrieveFile(modSlug, fileVersion)
-        val depsPage = retrieveDeps(modSlug)
-        val versionTitle = page.getElementsByClass("text-primary-500").first { it.tagName() == "h3" }
-        val urlPath = versionTitle.parent().attr("href").trim('/').split('/')
-        val sidebar = page.getElementsByTag("aside").first()
-        val projProps = sidebar.getElementsWithExactOwnText("About Project").first().parent().nextElementSibling()
-            .children().associate { it.child(0).text() to it.child(1) }
-        val article = page.getElementsByTag("article").first()
-        return ModVersion(
-            Mod(
-                urlPath[urlPath.lastIndex - 2],
-                page.getElementsByClass("game-header").first().getElementsByClass("text-lg").first().text(),
-                projProps.getValue("Project ID").text().toLong(),
-                sidebar.getElementsWithExactOwnText("Owner").first().previousElementSibling().child(0).text(),
-                License.parse(projProps.getValue("License").text())
-            ),
-            versionTitle.text(),
-            urlPath.last().toLong(),
-            article.child(2).children().flatMap {
-                it.children().let { v -> v.subList(1, v.size) }.map { v -> v.text() }
-            }.mapNotNull { GameVersion.parseGracefully(it) }.firstOrNull() ?: defaultVersion,
-            Instant.ofEpochMilli(
-                article.child(1).getElementsWithExactOwnText("Uploaded").first()
-                    .nextElementSibling().child(0).attr("data-epoch").toLong()
-            ),
-            depsPage.getElementsByClass("project-listing-row").map {
-                it.getElementsByClass("project-avatar").first().child(0).attr("href").trim('/').split('/').last()
-            }.toSet()
-        )
-    }
-
-    private fun Element.getElementsWithExactOwnText(text: String): Elements =
-        Collector.collect(object : Evaluator() {
-            override fun matches(root: Element, element: Element): Boolean = element.ownText() == text
-        }, this)
-
-    private fun retrieveProject(modSlug: String): Document = CurseUrlBuilder(modSlug).build().retrieve()
-
-    private fun retrieveFile(modSlug: String, fileId: Long): Document =
-        CurseUrlBuilder(modSlug).path("files", fileId.toString()).build().retrieve()
-
-    private fun retrieveDeps(modSlug: String, req: Boolean = true): Document {
-        val urlBuilder = CurseUrlBuilder(modSlug).path("relations", "dependencies")
-        if (req) {
-            urlBuilder.query("filter-related-dependencies", "3")
+    fun retrieveModBySlug(slug: String): CurseApiMod = ApiUrlBuilder("addon", "search")
+        .query("categoryId", "0").query("gameId", "432").query("searchFilter", slug).query("sectionId", "6").build()
+        .retrieve { Klaxon().parseJsonArray(it) }
+        .let { mods ->
+            mods.firstNotNullResult { dto -> CurseApiMod.deserialize(dto as JsonObject).takeIf { it.slug == slug } }
+                ?: throw NoSuchElementException("Could not resolve mod data for slug: $slug")
         }
-        return urlBuilder.build().retrieve()
+
+    fun retrieveMod(ref: ModRef): CurseApiMod = when (ref) {
+        is ModProjectId -> retrieveModById(ref.id)
+        is ModSlug -> retrieveModBySlug(ref.slug)
     }
 
-    private fun URL.retrieve(): Document = try {
-        Jsoup.parse(this, 3000)
-    } catch (e: HttpStatusException) {
-        throw IllegalStateException("Encountered HTTP ${e.statusCode} at url: ${e.url}", e)
+    fun retrieveModFile(projectId: Long, fileId: Long): CurseApiFile =
+        ApiUrlBuilder("addon", projectId.toString(), "file", fileId.toString()).build()
+            .retrieve { CurseApiFile.deserialize(Klaxon().parseJsonObject(it)) }
+
+    private fun <T> URL.retrieve(action: (Reader) -> T?): T = try {
+        action(openStream().bufferedReader()) ?: throw IllegalStateException("Failed to parse JSON at URL: $this")
     } catch (e: Exception) {
         throw IllegalStateException("Failed to read url: $this", e)
     }
 }
+
+fun CurseApiMod.parseMod(): Mod = Mod(
+    slug, name, id, authors.firstOrNull()?.name ?: "", License.UNKNOWN // TODO find mod license somehow
+)
+
+fun CurseApiFile.parseVersion(mod: Mod, defaultGameVersion: GameVersion): ModVersion = ModVersion(
+    mod,
+    displayName,
+    id,
+    gameVersion.firstNotNullResult { GameVersion.parseGracefully(it) } ?: defaultGameVersion,
+    fileDate,
+    dependencies.filter { it.type == 3 }.map { ModProjectId(it.addonId) }.toSet()
+)

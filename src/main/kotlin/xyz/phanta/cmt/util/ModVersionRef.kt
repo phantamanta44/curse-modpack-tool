@@ -2,22 +2,24 @@ package xyz.phanta.cmt.util
 
 sealed class ModVersionRef {
     companion object {
-        private val REF_PATTERN: Regex = Regex("""([a-z0-9\-]+)(?:@(\d+))?""")
-
-        fun parse(ref: String): ModVersionRef {
-            val match = REF_PATTERN.matchEntire(ref) ?: throw IllegalArgumentException("Invalid mod version ref: $ref")
-            return match.groups[2]?.let { ClosedModVersionRef(match.groups[1]!!.value, it.value.toLong()) }
-                ?: OpenModVersionRef(match.groups[1]!!.value)
+        fun parse(ref: String): ModVersionRef = ref.indexOf('@').let { vIndex ->
+            if (vIndex == -1) {
+                ModRef.parseGracefully(ref)?.let { OpenModVersionRef(it) }
+            } else {
+                ModRef.parseGracefully(ref.substring(0, vIndex))?.let {
+                    ref.substring(vIndex + 1).toLongOrNull()?.let { version -> ClosedModVersionRef(it, version) }
+                }
+            } ?: throw IllegalArgumentException("Invalid mod version ref: $ref")
         }
     }
 
-    abstract val slug: String
+    abstract val modRef: ModRef
 }
 
-data class OpenModVersionRef(override val slug: String) : ModVersionRef() {
-    override fun toString(): String = slug
+data class OpenModVersionRef(override val modRef: ModRef) : ModVersionRef() {
+    override fun toString(): String = modRef.toString()
 }
 
-data class ClosedModVersionRef(override val slug: String, val fileId: Long) : ModVersionRef() {
-    override fun toString(): String = "$slug@$fileId"
+data class ClosedModVersionRef(override val modRef: ModRef, val fileId: Long) : ModVersionRef() {
+    override fun toString(): String = "$modRef@$fileId"
 }

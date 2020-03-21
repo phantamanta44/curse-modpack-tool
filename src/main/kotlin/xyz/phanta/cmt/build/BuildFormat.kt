@@ -1,7 +1,6 @@
 package xyz.phanta.cmt.build
 
 import com.beust.klaxon.json
-import org.jsoup.nodes.Element
 import xyz.phanta.cmt.LOGGER
 import xyz.phanta.cmt.model.ModLoader
 import xyz.phanta.cmt.workspace.ModpackWorkspace
@@ -11,6 +10,11 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.transform.OutputKeys
+import javax.xml.transform.TransformerFactory
+import javax.xml.transform.dom.DOMSource
+import javax.xml.transform.stream.StreamResult
 
 private fun ZipOutputStream.writeEntry(name: String, body: FilterOutputStream.() -> Unit) {
     putNextEntry(ZipEntry(name))
@@ -41,7 +45,7 @@ enum class BuildFormat(val key: String) {
                             "version" to workspace.model.version,
                             "author" to workspace.model.author,
                             "overrides" to ".minecraft",
-                            "files" to array(workspace.model.mods.values.map {
+                            "files" to array(workspace.model.mods.map {
                                 obj(
                                     "projectID" to it.mod.projectId,
                                     "fileID" to it.fileId,
@@ -53,13 +57,21 @@ enum class BuildFormat(val key: String) {
                 }
                 LOGGER.info { "Writing mod list..." }
                 out.writeEntry("modlist.html") {
-                    val list = Element("ul")
-                    workspace.model.mods.values.forEach {
-                        val entry = list.appendElement("li").appendElement("a")
-                        entry.attr("href", "https://www.curseforge.com/minecraft/mc-mods/${it.mod.slug}")
-                        entry.text("${it.mod.name} (by ${it.mod.author})")
+                    val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument()
+                    val list = document.createElement("ul")
+                    document.appendChild(list)
+                    workspace.model.mods.forEach {
+                        val entry = document.createElement("li")
+                        list.appendChild(entry)
+                        val link = document.createElement("a")
+                        entry.appendChild(link)
+                        link.setAttribute("href", "https://www.curseforge.com/minecraft/mc-mods/${it.mod.slug}")
+                        link.appendChild(document.createTextNode("${it.mod.name} (by ${it.mod.author})"))
                     }
-                    write(list.outerHtml().toByteArray(Charsets.UTF_8))
+                    val transformer = TransformerFactory.newInstance().newTransformer()
+                    transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8")
+                    transformer.setOutputProperty(OutputKeys.INDENT, "yes")
+                    transformer.transform(DOMSource(document), StreamResult(this))
                 }
                 LOGGER.info { "Copying override assets..." }
                 Files.walk(workspace.mcDir)
@@ -79,9 +91,9 @@ enum class BuildFormat(val key: String) {
             PrintStream(Files.newOutputStream(dest).buffered()).use { out ->
                 out.println("digraph modpack {")
                 LOGGER.info { "Collecting mod nodes..." }
-                workspace.model.mods.values.forEach { out.println("  \"${it.mod.slug}\" [label=\"$it\"]") }
+                workspace.model.mods.forEach { out.println("  \"${it.mod.slug}\" [label=\"$it\"]") }
                 LOGGER.info { "Collecting dependency edges..." }
-                workspace.model.mods.values.forEach { mod ->
+                workspace.model.mods.forEach { mod ->
                     mod.dependencies.forEach {
                         out.println("  \"$it\" -> \"${mod.mod.slug}\"")
                     }

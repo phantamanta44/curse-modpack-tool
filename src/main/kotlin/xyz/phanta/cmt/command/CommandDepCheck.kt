@@ -2,14 +2,15 @@ package xyz.phanta.cmt.command
 
 import xyz.phanta.cmt.LOGGER
 import xyz.phanta.cmt.model.ModVersion
+import xyz.phanta.cmt.util.ModRef
 import xyz.phanta.cmt.workspace.ModpackWorkspace
 
 class CommandDepCheck : CmtWorkspaceCommand("depcheck", "Searches for missing mod dependencies.") {
     override fun runInWorkspace(workspace: ModpackWorkspace): Boolean {
-        val missing = mutableMapOf<String, MutableList<ModVersion>>()
-        workspace.model.mods.values.forEach { mod ->
+        val missing = mutableMapOf<ModRef, MutableList<ModVersion>>()
+        workspace.model.mods.forEach { mod ->
             mod.dependencies.forEach {
-                if (it !in workspace.model.mods) {
+                if (workspace.model.getMod(it) == null) {
                     missing.computeIfAbsent(it) { mutableListOf() } += mod
                 }
             }
