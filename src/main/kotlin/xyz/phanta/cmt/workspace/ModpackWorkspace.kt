@@ -8,10 +8,7 @@ import xyz.phanta.cmt.curse.parseMod
 import xyz.phanta.cmt.curse.parseVersion
 import xyz.phanta.cmt.model.GameVersion
 import xyz.phanta.cmt.model.ModpackModel
-import xyz.phanta.cmt.util.ClosedModVersionRef
-import xyz.phanta.cmt.util.ModRef
-import xyz.phanta.cmt.util.ModVersionRef
-import xyz.phanta.cmt.util.OpenModVersionRef
+import xyz.phanta.cmt.util.*
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.*
@@ -69,8 +66,19 @@ class ModpackWorkspace(val workingDir: Path, val model: ModpackModel) {
         }
 
         val refQueue = LinkedList(refs)
+        val visitedIds = mutableSetOf<Long>()
+        val visitedSlugs = mutableSetOf<String>()
         queueLoop@ while (refQueue.isNotEmpty()) {
             val ref = refQueue.pop()
+            if (ref.modRef.let {
+                    when (it) {
+                        is ModProjectId -> it.id !in visitedIds
+                        is ModSlug -> it.slug !in visitedSlugs
+                    }
+                }) {
+                continue
+            }
+
             LOGGER.info { "Resolving reference [${refQueue.size}]: $ref" }
             val (mod, fileId) = when (ref) {
                 is OpenModVersionRef -> try {
@@ -102,6 +110,8 @@ class ModpackWorkspace(val workingDir: Path, val model: ModpackModel) {
                     continue@queueLoop
                 }
             }
+            visitedIds += mod.projectId
+            visitedSlugs += mod.slug
 
             LOGGER.info { "Retrieving mod file data..." }
             try {
@@ -114,9 +124,7 @@ class ModpackWorkspace(val workingDir: Path, val model: ModpackModel) {
                         if (deps.isNotEmpty()) {
                             LOGGER.info { "Found ${deps.size} missing dependency(s): ${deps.joinToString(", ")}" }
                             deps.forEach { dep ->
-                                if (!refQueue.any { it.modRef == dep }) {
-                                    refQueue += OpenModVersionRef(dep)
-                                }
+                                refQueue += OpenModVersionRef(dep)
                             }
                         }
                     }
