@@ -72,8 +72,8 @@ class ModpackWorkspace(val workingDir: Path, val model: ModpackModel) {
             val ref = refQueue.pop()
             if (ref.modRef.let {
                     when (it) {
-                        is ModProjectId -> it.id !in visitedIds
-                        is ModSlug -> it.slug !in visitedSlugs
+                        is ModProjectId -> it.id in visitedIds
+                        is ModSlug -> it.slug in visitedSlugs
                     }
                 }) {
                 continue
